@@ -1,0 +1,47 @@
+# docker-compose.yml
+version: "3.8"
+
+services:
+  selenium:
+    image: selenium/standalone-chrome:latest
+    container_name: selenium_chrome
+    restart: unless-stopped
+    ports:
+      - "4444:4444"          # Selenium server
+    shm_size: "2gb"         # avoid Chrome crashes due to small /dev/shm
+    environment:
+      - SE_OPTS=-host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  tests:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: qa_tests
+    depends_on:
+      selenium:
+        condition: service_healthy
+    environment:
+      # Instruct the test container to use the remote Selenium server
+      - USE_REMOTE=true
+      - SELENIUM_URL=http://selenium:4444/wd/hub
+      - HEADLESS=true
+    volumes:
+      - ./:/app                        # mount project into container (so tests run on latest code)
+      - ./report:/app/report           # collect html report
+      - ./screenshots:/app/screenshots # collect screenshots
+    working_dir: /app
+    command: >
+      /bin/sh -c "pytest -q --html=report/report.html --self-contained-html || true"
+    # `|| true` ensures container doesn't exit with non-zero (so logs/artifacts are accessible).
+    # Remove it if you prefer the container to stop on test failures.
+    tty: true
+    restart: "no"
+
+networks:
+  default:
+    driver: bridge
